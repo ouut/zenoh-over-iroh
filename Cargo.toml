@@ -2,6 +2,9 @@
 name = "zenoh-link-state"
 version = "0.1.0"
 edition = "2021"
+
+[lib]
+crate-type = ["lib", "cdylib", "staticlib"]
 description = "Three-state link state machine for zenoh transport plugins — handles QUIC path migration gracefully without disrupting upper-layer protocols"
 authors = ["zenoh-link-iroh contributors"]
 license = "MIT OR Apache-2.0"
