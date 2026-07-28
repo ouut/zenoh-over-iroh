@@ -107,10 +107,10 @@ impl ChatManager {
         }
     }
 
-    /// 格式化消息用于显示。
-    pub async fn format_message(&self, msg: &ChatMessage) -> String {
-        let ts = msg.timestamp_ms % 100000; // HH:MM:SS 简化
-        let sender = if msg.sender.node_id == self.room.lock().await.me.node_id {
+    /// 格式化消息用于显示（不获取锁，由调用方提供自己的 node_id）。
+    pub fn format_message(me_node_id: &str, msg: &ChatMessage) -> String {
+        let ts = msg.timestamp_ms % 100000;
+        let sender = if msg.sender.node_id == me_node_id {
             "👤 我".to_string()
         } else {
             format!("👤 {}", msg.sender.name)

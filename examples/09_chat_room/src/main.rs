@@ -87,7 +87,7 @@ async fn main() {
             text: "👋 加入了聊天室".into(),
             timestamp_ms: now_ms(),
         };
-        println!("{}", manager.format_message(&msg).await);
+        println!("{}", ChatManager::format_message(&node_id, &msg));
         debug!(msg = ?msg.text, "Sent join message");
     }
 
@@ -104,7 +104,7 @@ async fn main() {
         };
         manager.room.lock().await.upsert_member(user);
         debug!(member_count = manager.room.lock().await.member_count(), "Room members updated");
-        println!("{}", manager.format_message(&msg).await);
+        println!("{}", ChatManager::format_message(&node_id, &msg));
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
@@ -130,12 +130,10 @@ async fn main() {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     std::thread::spawn(move || {
         debug!("Stdin reader thread started");
-        print!("> ");
         io::stdout().flush().ok();
         for line in io::stdin().lock().lines() {
             match line {
                 Ok(s) if s.trim().is_empty() => {
-                    print!("> ");
                     io::stdout().flush().ok();
                 }
                 Ok(s) => {
@@ -167,7 +165,7 @@ async fn main() {
                     text: "👋 离开了聊天室".into(),
                     timestamp_ms: now_ms(),
                 };
-                println!("{}", manager.format_message(&msg).await);
+                println!("{}", ChatManager::format_message(&node_id, &msg));
                 break;
             }
             "/help" => {
@@ -254,10 +252,9 @@ async fn main() {
                     len = msg.text.len(),
                     "Message sent"
                 );
-                println!("{}", manager.format_message(&msg).await);
+                println!("{}", ChatManager::format_message(&node_id, &msg));
             }
         }
-        print!("> ");
         io::stdout().flush().ok();
     }
 
