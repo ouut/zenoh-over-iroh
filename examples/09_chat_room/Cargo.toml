@@ -1,0 +1,15 @@
+[package]
+name = "zenoh-chat-room"
+version = "0.1.0"
+edition = "2021"
+description = "基于 zenoh-link-iroh 的 P2P 控制台聊天室"
+
+[[bin]]
+name = "chat"
+path = "src/main.rs"
+
+[dependencies]
+zenoh-link-state = { path = "../.." }
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"

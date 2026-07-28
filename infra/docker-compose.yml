@@ -1,0 +1,56 @@
+# Zenoh × Iroh Phase 3 测试拓扑编排
+# 双客户端 + 官方 Relay 出口（通过 internet 访问 presets::N0）
+#
+# 使用方式：
+#   docker compose up -d
+#   docker compose down -v
+
+version: "3.9"
+
+services:
+  # ── 客户端节点 A ──────────────────────────────────
+  node-a:
+    image: ubuntu:latest
+    container_name: zenoh-test-node-a
+    hostname: node-a
+    cap_add:
+      - NET_ADMIN          # 允许 iptables / tc 操作
+    sysctls:
+      - net.ipv4.ip_forward=1
+    command: >
+      bash -c "
+        apt-get update -qq &&
+        apt-get install -y -qq iproute2 iptables tcpdump curl > /dev/null 2>&1 &&
+        echo 'node-a ready' &&
+        sleep infinity
+      "
+    networks:
+      zenoh-test-net:
+        ipv4_address: 172.30.0.10
+
+  # ── 客户端节点 B ──────────────────────────────────
+  node-b:
+    image: ubuntu:latest
+    container_name: zenoh-test-node-b
+    hostname: node-b
+    cap_add:
+      - NET_ADMIN
+    sysctls:
+      - net.ipv4.ip_forward=1
+    command: >
+      bash -c "
+        apt-get update -qq &&
+        apt-get install -y -qq iproute2 iptables tcpdump curl > /dev/null 2>&1 &&
+        echo 'node-b ready' &&
+        sleep infinity
+      "
+    networks:
+      zenoh-test-net:
+        ipv4_address: 172.30.0.20
+
+networks:
+  zenoh-test-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
