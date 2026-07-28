@@ -140,3 +140,125 @@ let drained = lsm.drain_queue();
 // 用户代码只需要这样
 cargo add zenoh-link-state   // 或等待 zenoh-link-iroh 发布后自动包含
 ```
+
+---
+
+## 不同 Zenoh 拓扑下的行为
+
+`LinkStateMachine` 作用于**单条 Link**（单条 Iroh QUIC 连接）。拓扑结构决定有多少条 Link 同时存在，每条 Link 有独立的状态机。
+
+### 1. Peer-to-Peer (对等模式)
+
+```
+  Node A ←──iroh──→ Node B
+  ┌─────┐          ┌─────┐
+  │ LSM │          │ LSM │    每条连接一个状态机
+  └─────┘          └─────┘
+```
+
+```rust
+// A 和 B 都这样配置
+zenoh::open(Config {
+    mode: Mode::Peer,
+    connect: Endpoints::from("iroh/<B的NodeID>"),
+    listen: Endpoints::from("iroh/<A的NodeID>"),
+}).await?;
+
+// 状态机自动管理 A↔B 之间的连接迁移
+```
+
+| 场景 | 状态机行为 |
+|------|----------|
+| A 切 Wi-Fi→4G | A 侧的 LSM 进入 Migrating，消息排队 |
+| B 正常 | B 侧的 LSM 保持 Connected，无影响 |
+| A 恢复 | LSM 回到 Connected，排队消息自动发送 |
+
+### 2. Client-Router (路由模式)
+
+```
+  Client A ──iroh──→ Router ──iroh──→ Client B
+  ┌─────┐         ┌────────┐         ┌─────┐
+  │ LSM │         │ LSM LSM│         │ LSM │
+  └─────┘         └────────┘         └─────┘
+```
+
+```rust
+// Router (服务器)
+zenohd -P iroh_link -l iroh/<router_node_id>
+
+// Client A
+zenoh::open(Config {
+    mode: Mode::Client,
+    connect: Endpoints::from("iroh/<router_node_id>"),
+}).await?;
+
+// Client B 同理
+```
+
+三条 Link、三个独立状态机：
+
+| Link | 若 A 侧切换网络 | 影响 |
+|------|:---:|------|
+| A↔Router | A 侧 LSM → Migrating | 仅 A↔Router 受影响 |
+| Router↔B | Router 侧 LSM 不变 | Router↔B 不受影响 |
+| A↔B 的消息 | Router 自动转发 | B 无感知 |
+
+### 3. Mesh (网状模式)
+
+```
+     A ──── B
+     │ \   / │
+     │  \ /  │
+     │   X   │     每个节点 2-3 条 Link
+     │  / \  │     每条 Link 独立状态机
+     │ /   \ │
+     C ──── D
+```
+
+```rust
+// 每个节点配置多个 connect
+zenoh::open(Config {
+    mode: Mode::Peer,
+    connect: Endpoints::from(vec![
+        "iroh/<B>", "iroh/<C>", "iroh/<D>",
+    ]),
+}).await?;
+```
+
+| 场景 | 行为 |
+|------|------|
+| C 断网 | A↔C LSM → Migrating，消息走 A→B→C 路径 |
+| C 恢复 | A↔C LSM → Connected，排队数据自动排出 |
+| C 永久断开 | LSM 超时 → Disconnected，Zenoh 路由剔除节点 |
+
+> **关键**：状态机只管单条 Link。多路径容灾是 Zenoh 路由层的事。
+
+### 4. 移动端（单 Client 切网）
+
+```
+  手机 A ──iroh──→ Relay/Peer
+  ┌─────────┐
+  │ LSM × 1 │   移动端通常只有一条 Link
+  └─────────┘
+```
+
+最典型场景——状态机价值最大：
+
+```
+Wi-Fi → 4G 切换:
+  LSM.on_path_change(false)  // Migrating
+  应用继续 put()              // 消息排队
+  LSM.on_path_change(true)   // 恢复, drain()
+  
+4G → Wi-Fi 切换:
+  同上，用户无感知
+```
+
+### 总结
+
+| 拓扑 | Link 数量 | LSM 实例数 | 故障隔离 |
+|------|:---:|:---:|:---:|
+| Peer-to-Peer | 1 | 2 (每端1个) | 单连接 |
+| Client-Router | 2 | 3 | 逐 Link 隔离 |
+| Mesh (3节点) | 3 | 6 | 故障 Link 自动绕路 |
+| 移动端 | 1 | 1 | 单 Link 迁移 |
