@@ -1,0 +1,19 @@
+[package]
+name = "qr-chat-server"
+version = "0.1.0"
+edition = "2021"
+description = "内网 PC 二维码消息接收器 — iroh P2P"
+
+[[bin]]
+name = "qrc"
+path = "src/main.rs"
+
+[dependencies]
+zenoh-link-state = { path = "../.." }
+iroh = "0.32"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
