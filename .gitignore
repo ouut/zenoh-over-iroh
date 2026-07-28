@@ -1,0 +1,10 @@
+/target/
+**/target/
+**/Cargo.lock
+.code-server-home/
+.codewhale/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
