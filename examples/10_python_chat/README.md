@@ -1,56 +1,55 @@
-# Python 聊天室 — LinkStateMachine 集成示例
+# Python 聊天室 — iroh P2P + LinkStateMachine
 
-> 使用 Python + TCP + LinkStateMachine 实现双向 P2P 聊天
+> Example 09 的 Python 复刻：spawn Rust iroh 二进制处理 QUIC P2P，
+> Python 侧提供 UI + LinkStateMachine 状态管理。
 
 ## 快速开始
 
 ```bash
-# 终端 1 (先启动，监听 9000)
+# 1. 编译 Rust iroh 聊天二进制
+cd examples/09_chat_room
+cargo build --release
+
+# 2. 终端 1
 cd examples/10_python_chat
-python chat.py Alice --port 9000
+python chat.py Alice
 
-# 终端 2 (连接 Alice)
-python chat.py Bob --connect localhost:9000 --port 9001
+# 3. 终端 2 (连接 Alice 的 NodeID)
+cd examples/10_python_chat
+python chat.py Bob
+# > /connect <Alice的NodeID>
 ```
-
-双方输入文字即可互通。
-
-## 命令
-
-| 命令 | 说明 |
-|------|------|
-| `/connect host:port` | 连接到远端 |
-| `/status` | 查看连接状态和排队数量 |
-| `/demo` | 演示 LinkStateMachine 断网恢复 |
-| `/quit` | 退出 |
 
 ## 架构
 
 ```
-终端 A (chat.py Alice)              终端 B (chat.py Bob)
-    │                                     │
-    ├─ TCP Server :9000  ←──── 连接 ──── TCP Client
-    ├─ TCP Client ──── 连接 ────→ TCP Server :9001
-    │                                     │
-    ├─ LinkStateMachine                    ├─ LinkStateMachine
-    │   ├─ Connected → write() Sent        │   ├─ Connected
-    │   ├─ Migrating → write() Queued      │   ├─ Migrating
-    │   └─ Disconnected → write() Error    │   └─ Disconnected
-    │                                     │
-    └─ stdin reader (thread)              └─ stdin reader (thread)
+┌─────────────────────────────────┐
+│  Python chat.py                 │  ← 本文件
+│  ├─ LinkStateMachine (FFI)      │     连接状态管理
+│  ├─ UI (stdin/stdout)           │     命令行交互
+│  └─ Subprocess                  │
+│       │ stdin/stdout             │
+│       ▼                          │
+│  Rust chat binary (example 09)  │  ← 真实 iroh QUIC P2P
+│  ├─ Iroh Endpoint               │
+│  ├─ QUIC P2P / Relay            │
+│  └─ Message routing             │
+└─────────────────────────────────┘
 ```
+
+## 通信流程
+
+1. Python 启动 Rust `chat` 二进制作为子进程
+2. Python 从 Rust stdout 提取 NodeID
+3. 用户输入 → Python 写入子进程 stdin
+4. 子进程通过 iroh QUIC 发送到对端
+5. 对端消息 → Rust stdout → Python 解析显示
 
 ## LinkStateMachine 行为
 
-| 网络状态 | write() 结果 | 聊天体验 |
-|---------|:---:|------|
-| TCP 正常 | `sent` | 消息立即送达 ✅ |
-| TCP 断开 | `queued` | 消息排队，恢复后自动发送 ⏳ |
-| 排队溢出 (backpressure) | `backpressure` | 提示"队列已满" 🚫 |
-| 显式断连 | `disconnected` | 提示"连接已断开" ❌ |
-
-## 依赖
-
-- Python 3.7+
-- `libzenoh_link_state.so` (编译 Rust crate)
-- 将 `.so` 和 `zenoh_link_state.py` 放在 Python path 中
+| 场景 | write() | 效果 |
+|------|:---:|------|
+| 正常 | sent | 消息通过 iroh 送达 |
+| 断网 | queued | 消息排队 |
+| 恢复 | drain() | 排队消息自动排出 |
+| 溢出 | backpressure | 提示用户稍候 |

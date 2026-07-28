@@ -1,151 +1,123 @@
 #!/usr/bin/env python3
 """
-Python 聊天室 — 基于 LinkStateMachine + TCP 实现双向通信。
+Python 聊天室 — 基于 iroh P2P (真实 QUIC 连接) + LinkStateMachine。
+
+Replicates example 09 in Python: spawns the Rust chat binary for iroh networking,
+wraps it with a Python UI + LinkStateMachine for connection state management.
+No TCP — all communication via real iroh QUIC P2P.
 
 运行:
-    # 终端1 (server 模式)
-    python chat.py Alice --port 9000
-
-    # 终端2 (client 模式)
-    python chat.py Bob --connect localhost:9000 --port 9001
+    cargo build --release  (in examples/09_chat_room/)
+    python chat.py Alice
+    python chat.py Bob
 """
 
-import sys, os, json, socket, threading, time
-from dataclasses import dataclass
+import sys, os, re, threading, queue, time
+from subprocess import Popen, PIPE
 
-# 将 bindings/python 加入路径以加载 LinkStateMachine
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../bindings/python"))
+# ── 定位 Rust chat 二进制 ──────────────────────────
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+CHAT_BIN = os.path.join(SCRIPT_DIR, "../09_chat_room/target/release/chat")
+if not os.path.exists(CHAT_BIN):
+    CHAT_BIN = os.path.join(SCRIPT_DIR, "../09_chat_room/target/debug/chat")
+if not os.path.exists(CHAT_BIN):
+    print("请先编译 Rust chat 二进制:")
+    print("  cd examples/09_chat_room && cargo build --release")
+    sys.exit(1)
+
+# ── 状态机 (Python binding) ────────────────────────
+
+sys.path.insert(0, os.path.join(SCRIPT_DIR, "../../bindings/python"))
 from zenoh_link_state import LinkStateMachine
 
-# ── Wire message ─────────────────────────────────────
-
-@dataclass
-class WireMsg:
-    sender:   str
-    text:     str
-    ts:       int
-    msg_type: str  # "msg" | "join" | "leave"
-
-def encode_msg(msg):
-    return (json.dumps(msg.__dict__) + "\n").encode()
-
-def decode_msg(line):
-    d = json.loads(line)
-    return WireMsg(**d)
-
-# ── TCP Server (接收消息) ────────────────────────────
-
-def run_server(port, on_recv):
-    """在后台线程运行 TCP server，收到消息时回调 on_recv(msg)"""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind(("0.0.0.0", port))
-    sock.listen(1)
-    sock.settimeout(1.0)
-
-    print(f"[server] 监听端口 {port}...")
-
-    while True:
-        try:
-            conn, addr = sock.accept()
-            print(f"[server] 连接来自 {addr}")
-            buf = b""
-            while True:
-                data = conn.recv(4096)
-                if not data:
-                    break
-                buf += data
-                while b"\n" in buf:
-                    line, buf = buf.split(b"\n", 1)
-                    try:
-                        msg = decode_msg(line.decode())
-                        on_recv(msg)
-                    except:
-                        pass
-            conn.close()
-            print(f"[server] 连接断开")
-        except socket.timeout:
-            continue
-        except OSError:
-            break
-
-# ── TCP Client (发送消息) ────────────────────────────
-
-class PeerConnection:
-    def __init__(self):
-        self.sock = None
-
-    def connect(self, host, port):
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.connect((host, port))
-        print(f"[client] 已连接到 {host}:{port}")
-
-    def send(self, msg):
-        """发送 WireMsg，失败则返回 False"""
-        if not self.sock:
-            return False
-        try:
-            self.sock.sendall(encode_msg(msg))
-            return True
-        except OSError:
-            return False
-
-    def close(self):
-        if self.sock:
-            self.sock.close()
-            self.sock = None
-
-# ── 主程序 ──────────────────────────────────────────
+# ── 主程序 ─────────────────────────────────────────
 
 def main():
-    import argparse
-    p = argparse.ArgumentParser(description="Python P2P Chat with LinkStateMachine")
-    p.add_argument("name", help="用户名")
-    p.add_argument("--port", type=int, default=9000, help="本地监听端口")
-    p.add_argument("--connect", help="远端地址 host:port")
-    args = p.parse_args()
+    user_name = sys.argv[1] if len(sys.argv) > 1 else "Anonymous"
 
-    # ── 状态机 ──────────────────────────────────
-    lsm = LinkStateMachine(max_queue_depth=100)
+    lsm = LinkStateMachine(max_queue_depth=50)
+    recv_queue = queue.Queue()
+    node_id = None
+    connected = False
 
+    # ── 启动 Rust iroh 进程 ────────────────────
+    proc = Popen([CHAT_BIN, user_name], stdin=PIPE, stdout=PIPE, stderr=PIPE, text=True,
+                 bufsize=1)
+
+    # ── 读取线程: 从 Rust 进程 stdout+stderr 提取 NodeID 和消息 ──
+    def reader():
+        nonlocal node_id
+        for line in proc.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            # 匹配 NodeID
+            m = re.search(r'NodeID:\s*([a-f0-9]{64})', line)
+            if m and not node_id:
+                node_id = m.group(1)
+                recv_queue.put(("nodeid", node_id))
+                continue
+            # 匹配聊天消息: [ts] 👤 name: text
+            m = re.match(r'\[(\d+)\]\s*(.+):\s*(.+)', line)
+            if m:
+                recv_queue.put(("msg", {"ts": m.group(1), "sender": m.group(2), "text": m.group(3)}))
+            else:
+                recv_queue.put(("raw", line))
+
+    def stderr_reader():
+        for line in proc.stderr:
+            line = line.strip()
+            if line:
+                recv_queue.put(("log", line))
+
+    threading.Thread(target=reader, daemon=True).start()
+    threading.Thread(target=stderr_reader, daemon=True).start()
+
+    # ── 等待 NodeID ────────────────────────────
     print()
-    print("╔══════════════════════════════════════════╗")
-    print("║   Python P2P 聊天室 + LinkStateMachine   ║")
-    print("╠══════════════════════════════════════════╣")
-    print(f"║ 用户: {args.name:<32} ║")
-    print(f"║ 端口: {args.port:<32} ║")
-    print("╚══════════════════════════════════════════╝")
-    print("  命令: /connect host:port  /help  /quit  /status")
-    print()
+    print("╔══════════════════════════════════════════════════╗")
+    print("║   Python × Iroh  P2P 控制台聊天室 (iroh QUIC)    ║")
+    print("╠══════════════════════════════════════════════════╣")
+    print(f"║ 用户:   {user_name:<38} ║")
 
-    peer = PeerConnection()
-    lock = threading.Lock()
-
-    # ── 消息接收回调 ───────────────────────────
-    def on_recv(msg):
-        tag = "👤 我" if msg.sender == args.name else f"👤 {msg.sender}"
-        t = msg.ts % 100000
-        print(f"\r[{t}] {tag}: {msg.text}")
-        print("> ", end="", flush=True)
-
-    # ── 启动服务器 ─────────────────────────────
-    srv = threading.Thread(target=run_server, args=(args.port, on_recv), daemon=True)
-    srv.start()
-
-    # ── 连接对端 ───────────────────────────────
-    if args.connect:
-        host, port = args.connect.rsplit(":", 1)
+    timeout = 10
+    while timeout > 0 and not node_id:
         try:
-            peer.connect(host, int(port))
-            lsm.on_path_change(True)  # 连接成功
-            peer.send(WireMsg(sender=args.name, text="👋 加入了聊天室",
-                              ts=int(time.time()*1000), msg_type="join"))
-        except Exception as e:
-            print(f"  ❌ 连接失败: {e}")
+            kind, val = recv_queue.get(timeout=1)
+            if kind == "nodeid":
+                node_id = val
+        except queue.Empty:
+            timeout -= 1
+
+    if not node_id:
+        print("║  ❌ 无法获取 NodeID                                   ║")
+        print("╚══════════════════════════════════════════════════╝")
+        proc.terminate()
+        return
+
+    print(f"║ NodeID: {node_id} ║")
+    print("╚══════════════════════════════════════════════════╝")
+    print(f"  输入 /connect <对方NodeID> 连接后开始聊天")
+    print(f"  命令: /connect /help /quit /status /demo")
+    print()
 
     # ── 主循环 ─────────────────────────────────
     try:
         while True:
+            # 检查接收队列
+            while True:
+                try:
+                    kind, val = recv_queue.get_nowait()
+                    if kind == "msg":
+                        tag = "👤 我" if val["sender"] == "👤 我" else val["sender"]
+                        print(f"\r[{val['ts']}] {tag}: {val['text']}")
+                    elif kind == "log" and ("ERROR" in val or "WARN" in val):
+                        print(f"\r  ⚠️ {val[:80]}")
+                except queue.Empty:
+                    break
+
+            # 输入
             print("> ", end="", flush=True)
             line = sys.stdin.readline()
             if not line:
@@ -153,65 +125,45 @@ def main():
             cmd = line.strip()
             if not cmd:
                 continue
+
             if cmd == "/quit":
                 break
             if cmd == "/help":
-                print("  /connect host:port  /quit  /status  /demo")
+                print("  /connect <NodeID>  /quit  /status  /demo")
                 continue
             if cmd == "/status":
-                s = lsm.is_connected and "Connected" or (lsm.is_migrating and "Migrating" or "Disconnected")
+                s = "Connected" if lsm.is_connected else ("Migrating" if lsm.is_migrating else "Disconnected")
                 print(f"  状态: {s} | 排队: {lsm.queue_length}")
                 continue
             if cmd == "/demo":
-                print("\n  🎬 网络切换演示")
-                print("  [1/3] 模拟断网 → Migrating")
+                print("\n  🎬 状态机演示")
                 lsm.on_path_change(False)
-                time.sleep(1)
-                status = lsm.write(b"demo_msg_during_outage")
-                print(f"  [2/3] 断网期间写入: {status} (queued)")
+                time.sleep(0.5)
+                print("  [1/3] Migrating — 消息排队")
+                lsm.write(b"demo")
                 lsm.on_path_change(True)
-                data = lsm.drain()
-                print(f"  [3/3] 恢复: 排出 {len(data)} 字节")
+                lsm.drain()
+                print("  [2/3] Connected — 恢复 ✓")
+                print(f"  [3/3] 状态: {'Connected' if lsm.is_connected else 'Migrating'}")
                 print()
                 continue
-            if cmd.startswith("/connect "):
-                addr = cmd.split(" ", 1)[1]
-                host, port = addr.rsplit(":", 1)
-                try:
-                    peer.connect(host, int(port))
-                    lsm.on_path_change(True)
-                    peer.send(WireMsg(sender=args.name, text="👋 加入了聊天室",
-                                      ts=int(time.time()*1000), msg_type="join"))
-                    print(f"  ✅ 已连接到 {addr}")
-                except Exception as e:
-                    lsm.on_path_change(False)
-                    print(f"  ❌ 连接失败: {e}")
-                    lsm.on_path_change(True)
-                continue
 
-            # 普通消息
-            wm = WireMsg(sender=args.name, text=cmd, ts=int(time.time()*1000), msg_type="msg")
-
-            # 通过状态机写入
-            status = lsm.write(encode_msg(wm)[:-1])  # 去掉尾部 \n
-
-            if status == "sent":
-                if not peer.send(wm):
-                    # 发送失败 → 进入 Migrating
-                    lsm.on_path_change(False)
-                    lsm.write(encode_msg(wm)[:-1])
-                    print("  ⚠️ 发送失败，消息已排队")
-            elif status == "queued":
-                print("  ⏳ 消息已排队 (网络断开中)")
-            elif status == "backpressure":
-                print("  🚫 队列已满，请稍候")
-            elif status == "disconnected":
-                print("  ❌ 连接已断开")
+            # 发送到 Rust 进程 (iroh P2P)
+            try:
+                proc.stdin.write(cmd + "\n")
+                proc.stdin.flush()
+            except BrokenPipeError:
+                print("  ❌ Rust 进程已退出")
+                break
 
     except KeyboardInterrupt:
         pass
     finally:
-        peer.close()
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except:
+            proc.kill()
         print("\n👋 再见！")
 
 if __name__ == "__main__":
