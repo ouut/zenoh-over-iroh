@@ -1,0 +1,160 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - 'v*'          # 推送 tag 时触发
+  workflow_dispatch:    # 手动触发
+
+permissions:
+  contents: write
+
+jobs:
+  # ── Linux x86_64 ──────────────────────────────
+  linux-x64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release
+      - run: |
+          mkdir -p artifacts/linux-x86_64
+          cp target/release/libzenoh_link_state.so artifacts/linux-x86_64/
+          cp target/release/libzenoh_link_state.a artifacts/linux-x86_64/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: artifacts/linux-x86_64/
+
+  # ── Linux aarch64 ─────────────────────────────
+  linux-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release
+      - run: |
+          mkdir -p artifacts/linux-aarch64
+          cp target/release/libzenoh_link_state.so artifacts/linux-aarch64/
+          cp target/release/libzenoh_link_state.a artifacts/linux-aarch64/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-aarch64
+          path: artifacts/linux-aarch64/
+
+  # ── macOS x86_64 ──────────────────────────────
+  macos-x64:
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release
+      - run: |
+          mkdir -p artifacts/macos-x86_64
+          cp target/release/libzenoh_link_state.dylib artifacts/macos-x86_64/
+          cp target/release/libzenoh_link_state.a artifacts/macos-x86_64/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-x86_64
+          path: artifacts/macos-x86_64/
+
+  # ── macOS aarch64 (Apple Silicon) ─────────────
+  macos-arm64:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - run: cargo build --release --target aarch64-apple-darwin
+      - run: |
+          mkdir -p artifacts/macos-aarch64
+          cp target/aarch64-apple-darwin/release/libzenoh_link_state.dylib artifacts/macos-aarch64/
+          cp target/aarch64-apple-darwin/release/libzenoh_link_state.a artifacts/macos-aarch64/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-aarch64
+          path: artifacts/macos-aarch64/
+
+  # ── Windows x86_64 ────────────────────────────
+  windows-x64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release
+      - run: |
+          mkdir -p artifacts/windows-x86_64
+          cp target/release/zenoh_link_state.dll artifacts/windows-x86_64/
+          cp target/release/zenoh_link_state.dll.lib artifacts/windows-x86_64/ 2>/dev/null || true
+          cp target/release/zenoh_link_state.lib artifacts/windows-x86_64/ 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: artifacts/windows-x86_64/
+
+  # ── WASM ──────────────────────────────────────
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - run: cargo build --release --target wasm32-unknown-unknown
+      - uses: jetli/wasm-bindgen-action@v0.2
+        with:
+          version: latest
+      - run: |
+          wasm-bindgen target/wasm32-unknown-unknown/release/zenoh_link_state.wasm \
+            --out-dir artifacts/wasm --target web
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasm
+          path: artifacts/wasm/
+
+  # ── 创建 GitHub Release ───────────────────────
+  release:
+    needs: [linux-x64, linux-arm64, macos-x64, macos-arm64, windows-x64, wasm]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - run: |
+          cd artifacts
+          for d in */; do
+            zip -r "zenoh-link-state-${d%/}.zip" "$d"
+          done
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.zip
+          body: |
+            ## Pre-built binaries for zenoh-link-state ${{ github.ref_name }}
+
+            No Rust toolchain needed. Download the zip for your platform, extract, and link.
+
+            ### Platforms
+
+            | File | Platform |
+            |------|----------|
+            | `linux-x86_64.zip` | Linux x86_64 (.so + .a) |
+            | `linux-aarch64.zip` | Linux ARM64 / Raspberry Pi 4+ (.so + .a) |
+            | `macos-x86_64.zip` | macOS Intel (.dylib + .a) |
+            | `macos-aarch64.zip` | macOS Apple Silicon (.dylib + .a) |
+            | `windows-x86_64.zip` | Windows x86_64 (.dll) |
+            | `wasm.zip` | Web / Node.js (.wasm + JS bindings) |
+
+            ### Usage (Python example)
+
+            ```bash
+            unzip zenoh-link-state-linux-x86_64.zip
+            cd linux-x86_64
+            python -c "from zenoh_link_state import LinkStateMachine; lsm = LinkStateMachine()"
+            ```
+
+            ### crates.io
+
+            ```bash
+            cargo add zenoh-link-state
+            ```

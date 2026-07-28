@@ -9,7 +9,8 @@
 | `js/`     | JavaScript / TypeScript | WebAssembly (wasm-bindgen) |
 | `python/` | Python                | ctypes (免编译) |
 | `lua/`    | Lua                   | C FFI via LuaJIT |
-| `mobile/` | iOS (Swift) + Android (Kotlin) | C FFI + JNI |
+| `ios/` | iOS (Swift) | C FFI + Bridging Header |
+| `android/` | Android (Kotlin) | C FFI + JNI |
 
 ## 支持的架构
 
