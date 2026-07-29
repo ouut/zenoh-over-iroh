@@ -40,8 +40,8 @@ cargo build --release --target aarch64-linux-android
 
 | 平台 | 文件 | 大小 |
 |------|------|------|
-| iOS | `target/aarch64-apple-ios/release/libzenoh_mobile.a` | ~20MB (release) |
-| Android | `target/aarch64-linux-android/release/libzenoh_mobile.so` | ~10MB (release) |
+| iOS | `../target/aarch64-apple-ios/release/libzenoh_mobile.a` | ~20MB (release) |
+| Android | `../target/aarch64-linux-android/release/libzenoh_mobile.so` | ~10MB (release) |
 
 ## 集成
 
@@ -128,8 +128,8 @@ close(s)
 | 语言 | 方案 | 代码量 |
 |------|------|:---:|
 | C | 直接包含 `include/zenoh_mobile.h` | 0 |
-| Python | `mobile/python/zenoh.py` (ctypes) | 50 行 |
-| Swift | `mobile/ios/ZenohMobile.h` / `.m` | 20 行 |
-| Kotlin | `mobile/android/ZenohMobile.kt` (JNI) | 15 行 |
+| Python | `python/zenoh.py` (ctypes) | 50 行 |
+| Swift | `swift/ZenohMobile.h` / `.m` | 20 行 |
+| Kotlin | `kotlin/ZenohMobile.kt` (JNI) | 15 行 |
 | Lua | `ffi.load("libzenoh_mobile")` | 10 行 |
 | Node.js | `ffi-napi` 加载 `.so` | 20 行 |
