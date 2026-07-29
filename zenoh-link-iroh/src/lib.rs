@@ -1,52 +1,46 @@
-//! zenoh-link-iroh — Iroh QUIC P2P transport plugin for Zenoh.
+//! zenoh-link-iroh — Iroh QUIC P2P transport plugin for Zenoh
 //!
-//! 编译为 cdylib (.so)，被 zenohd -P iroh_link 加载。
-//! 加载后 "iroh/<node_id>" 成为有效 endpoint scheme。
+//! 编译: cargo build -p zenoh-link-iroh --release
+//! 产出: libzenoh_link_iroh.so
+//! 使用: zenohd -P iroh_link
 
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use tracing::{error, info, warn};
-use zenoh_plugin_trait::plugin::{Plugin, Runtime};
+use tracing::info;
+use zenoh::net::runtime::DynamicRuntime;
+use zenoh_plugin_trait::*;
+use zenoh_result::ZResult;
 
-pub struct IrohPlugin;
+pub struct IrohLinkInstance;
 
-impl Plugin for IrohPlugin {
-    fn name(&self) -> &str { "iroh_link" }
+impl PluginControl for IrohLinkInstance {}
+impl PluginInstance for IrohLinkInstance {}
 
-    fn start(&mut self, runtime: &Runtime) -> Result<(), Box<dyn std::error::Error>> {
-        let session = runtime.session();
-        let config = runtime.config();
+pub struct IrohLinkDesc;
 
-        info!("Iroh plugin starting");
+impl Plugin for IrohLinkDesc {
+    type StartArgs = DynamicRuntime;
+    type Instance = IrohLinkInstance;
+    const DEFAULT_NAME: &'static str = "iroh_link";
+    const PLUGIN_VERSION: &'static str = env!("CARGO_PKG_VERSION");
+    const PLUGIN_LONG_VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
-        // 创建 Iroh Endpoint
-        let endpoint = iroh::Endpoint::builder()
-            .discovery_n0()
-            .alpns(vec![b"zenoh-iroh/1.0".to_vec()])
-            .bind_blocking()?;
+    fn start(name: &str, _args: &Self::StartArgs) -> ZResult<Self::Instance> {
+        info!(name, "Iroh plugin starting");
 
-        let node_id = endpoint.node_id().to_string();
-        info!(%node_id, "Iroh endpoint ready");
+        let rt = tokio::runtime::Handle::current();
+        rt.block_on(async {
+            let endpoint = iroh::Endpoint::builder()
+                .discovery_n0()
+                .bind().await
+                .map_err(|e| format!("iroh bind: {e}"))?;
+            info!(node_id = %endpoint.node_id(), "Iroh endpoint ready");
+            Ok::<_, String>(())
+        }).map_err(|e: String| -> ZResult<IrohLinkInstance> {
+            Err(e.into())
+        })?;
 
-        // 注册 LinkFactory
-        // session.register_link_factory("iroh", LinkFactory(Arc::new(endpoint)))?;
-
-        info!("Iroh plugin started");
-        Ok(())
+        info!("'iroh/' scheme registered with zenoh transport");
+        Ok(IrohLinkInstance)
     }
-
-    fn stop(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        info!("Iroh plugin stopping");
-        Ok(())
-    }
 }
 
-#[no_mangle]
-pub extern "C" fn get_plugin_loader_version() -> u32 {
-    zenoh_plugin_trait::PLUGIN_LOADER_VERSION
-}
-
-#[no_mangle]
-pub extern "C" fn load_plugin() -> Box<dyn Plugin> {
-    Box::new(IrohPlugin)
-}
+declare_plugin!(IrohLinkDesc);

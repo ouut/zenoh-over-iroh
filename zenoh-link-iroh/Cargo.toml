@@ -9,8 +9,9 @@ crate-type = ["cdylib"]
 
 [dependencies]
 iroh = "0.32"
+zenoh = { version = "1", features = [] }
 zenoh-plugin-trait = "1"
-zenoh-link-commons = "1"
+zenoh-result = "1"
 zenoh-link-state = { path = ".." }
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 tracing = "0.1"
