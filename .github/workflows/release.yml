@@ -8,172 +8,113 @@ on:
 permissions:
   contents: write
 
+# ××××××××××××××××××××××××××××××××××××××××××××
+#  产物 1: 传输层插件  编译: make plugin
+# ××××××××××××××××××××××××××××××××××××××××××××
 jobs:
-  # ══════════════════════════════════════════════
-  #  产物 1: 传输层插件 (zenohd -P iroh_link)
-  # ══════════════════════════════════════════════
-  plugin-linux-x64:
-    runs-on: ubuntu-latest
+  plugin:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            ext: so
+          - os: macos-13
+            target: x86_64-apple-darwin
+            ext: dylib
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            ext: dylib
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            ext: dll
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build --release -p zenoh-link-iroh
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p zenoh-link-iroh --target ${{ matrix.target }}
       - run: |
           mkdir -p release
-          cp target/release/libzenoh_link_iroh.so release/
+          if [ "${{ matrix.ext }}" = "dll" ]; then
+            cp target/${{ matrix.target }}/release/zenoh_link_iroh.${{ matrix.ext }} release/
+          else
+            cp target/${{ matrix.target }}/release/libzenoh_link_iroh.${{ matrix.ext }} release/
+          fi
       - uses: actions/upload-artifact@v4
         with:
-          name: plugin-linux-x86_64
-          path: release/*.so
-
-  plugin-macos-x64:
-    runs-on: macos-13
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build --release -p zenoh-link-iroh
-      - run: |
-          mkdir -p release
-          cp target/release/libzenoh_link_iroh.dylib release/
-      - uses: actions/upload-artifact@v4
-        with:
-          name: plugin-macos-x86_64
-          path: release/*.dylib
-
-  plugin-macos-arm64:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with: { targets: aarch64-apple-darwin }
-      - run: cargo build --release -p zenoh-link-iroh --target aarch64-apple-darwin
-      - run: |
-          mkdir -p release
-          cp target/aarch64-apple-darwin/release/libzenoh_link_iroh.dylib release/
-      - uses: actions/upload-artifact@v4
-        with:
-          name: plugin-macos-arm64
-          path: release/*.dylib
-
-  plugin-windows-x64:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build --release -p zenoh-link-iroh
-      - run: |
-          mkdir release
-          cp target/release/zenoh_link_iroh.dll release/
-      - uses: actions/upload-artifact@v4
-        with:
-          name: plugin-windows-x86_64
-          path: release/*.dll
-
-  # ══════════════════════════════════════════════
-  #  产物 2: 完整 Zenoh API + Iroh 跨语言库
-  # ══════════════════════════════════════════════
-  bindings-linux-x64:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build --release -p zenoh-over-iroh
-      - run: |
-          mkdir -p release
-          cp target/release/libzenoh_over_iroh.so release/
-          cp target/release/libzenoh_over_iroh.a release/
-      - uses: actions/upload-artifact@v4
-        with:
-          name: bindings-linux-x86_64
+          name: plugin-${{ matrix.target }}
           path: release/
 
-  bindings-macos-x64:
-    runs-on: macos-13
+  # ××××××××××××××××××××××××××××××××××××××××××××
+  #  产物 2: 跨语言完整库  编译: make bindings
+  # ××××××××××××××××××××××××××××××××××××××××××××
+  bindings:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            ext: so
+          - os: macos-13
+            target: x86_64-apple-darwin
+            ext: dylib
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            ext: dylib
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            ext: dll
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build --release -p zenoh-over-iroh
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p zenoh-over-iroh --target ${{ matrix.target }}
       - run: |
           mkdir -p release
-          cp target/release/libzenoh_over_iroh.dylib release/
-          cp target/release/libzenoh_over_iroh.a release/
+          BASE="target/${{ matrix.target }}/release/libzenoh_over_iroh"
+          if [ "${{ matrix.ext }}" = "dll" ]; then
+            cp "target/${{ matrix.target }}/release/zenoh_over_iroh.dll" release/
+          else
+            cp "${BASE}.${{ matrix.ext }}" release/
+            cp "${BASE}.a" release/ 2>/dev/null || true
+          fi
       - uses: actions/upload-artifact@v4
         with:
-          name: bindings-macos-x86_64
+          name: bindings-${{ matrix.target }}
           path: release/
 
-  bindings-macos-arm64:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with: { targets: aarch64-apple-darwin }
-      - run: cargo build --release -p zenoh-over-iroh --target aarch64-apple-darwin
-      - run: |
-          mkdir -p release
-          cp target/aarch64-apple-darwin/release/libzenoh_over_iroh.dylib release/
-          cp target/aarch64-apple-darwin/release/libzenoh_over_iroh.a release/
-      - uses: actions/upload-artifact@v4
-        with:
-          name: bindings-macos-arm64
-          path: release/
-
-  bindings-windows-x64:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build --release -p zenoh-over-iroh
-      - run: |
-          mkdir release
-          cp target/release/zenoh_over_iroh.dll release/
-          cp target/release/zenoh_over_iroh.lib release/
-      - uses: actions/upload-artifact@v4
-        with:
-          name: bindings-windows-x86_64
-          path: release/
-
-  # ══════════════════════════════════════════════
-  #  Release: 合并所有产物
-  # ══════════════════════════════════════════════
+  # ××××××××××××××××××××××××××××××××××××××××××××
+  #  Release: 合并 → GitHub Release
+  # ××××××××××××××××××××××××××××××××××××××××××××
   release:
-    needs: [plugin-linux-x64, plugin-macos-x64, plugin-macos-arm64, plugin-windows-x64,
-            bindings-linux-x64, bindings-macos-x64, bindings-macos-arm64, bindings-windows-x64]
+    needs: [plugin, bindings]
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with: { path: artifacts }
       - uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*/*
           body: |
-            ## Zenoh × Iroh — v${{ github.ref_name }}
+            ## Zenoh × Iroh v${{ github.ref_name }}
 
-            ### 产物 1: 传输层插件 (for zenohd)
+            ### 产物 1: 传输层插件
+            - `libzenoh_link_iroh.so/dylib/dll` → `zenohd -P iroh_link`
 
-            | 文件 | 平台 | 用途 |
-            |------|------|------|
-            | `libzenoh_link_iroh.so` | Linux x86_64 | `zenohd -P iroh_link` |
-            | `libzenoh_link_iroh.dylib` | macOS Intel/ARM | `zenohd -P iroh_link` |
-            | `zenoh_link_iroh.dll` | Windows | `zenohd -P iroh_link` |
-
-            ### 产物 2: 跨语言完整库 (Zenoh API + Iroh)
-
-            | 文件 | 平台 | 语言支持 |
-            |------|------|---------|
-            | `libzenoh_over_iroh.so` + `.a` | Linux | C/Python/Lua/Node.js |
-            | `libzenoh_over_iroh.dylib` + `.a` | macOS | C/Python/Swift |
-            | `zenoh_over_iroh.dll` + `.lib` | Windows | C/Python/Node.js |
-
-            ### 使用方式
+            ### 产物 2: 跨语言完整库
+            - `libzenoh_over_iroh.so/dylib/dll` + `.a`
+            - C / Python / Swift / Kotlin 直接调用
 
             ```bash
-            # 桌面端
             zenohd -P iroh_link
-
-            # 跨语言 (Python)
-            from bindings.python.zenoh import open_session, put
-            s = open_session('{"listen":{"endpoints":["iroh/0.0.0.0:0"]}}')
-            put(s, "hello", "world")
+            # 配置: listen.endpoints = ["iroh/0.0.0.0:0"]
             ```
