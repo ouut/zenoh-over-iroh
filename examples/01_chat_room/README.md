@@ -1,49 +1,46 @@
-# example 01 — P2P 聊天室 (Zenoh API + Iroh 传输层)
+# example 01 — iroh P2P 命令行聊天室
 
-> 命令行聊天室，支持群聊+私信。
-> 传输层可一键切换 TCP ↔ Iroh P2P（配置改一行即可）。
-
----
+> 两个终端通过 Iroh QUIC 直连聊天。
+> 包含 `LinkStateMachine` 状态管理示例。
 
 ## 快速开始
 
 ```bash
 cd examples/01_chat_room
 
-# 终端 1
-cargo run --release -- Alice lobby
+# 终端 A
+cargo run -- Alice
 
-# 终端 2
-cargo run --release -- Bob lobby
+# 终端 B  
+cargo run -- Bob
 
-# 输入文字 → 群发
-# /msg Bob 你好 → 私信
-```
-
-## 配置切换传输层
-
-```rust
-// 当前用 TCP（稳定可用）
-"listen": { "endpoints": ["tcp/127.0.0.1:0"] },
-
-// 改为 Iroh P2P（需插件，改一行即可）
-"listen": { "endpoints": ["iroh/0.0.0.0:0"] },
-```
-
-其他代码零改动——这就是 Zenoh 传输层可插拔的设计。
-
-## 编译
-
-```bash
-cd examples/01_chat_room
-cargo build --release    # 首次 ~5min
+# 终端 B 输入: /connect <Alice 的 NodeID>
+# 然后双方即可聊天
 ```
 
 ## 命令
 
 | 输入 | 行为 |
 |------|------|
-| 任何文字 | 群发到房间 |
-| `/msg Bob hello` | 私信 Bob |
-| `/rooms` | 查看成员 |
+| 任何文字 | 发送给对方 |
+| `/connect <NodeID>` | 连接到对方 |
 | `/quit` | 退出 |
+
+## 编译
+
+```bash
+cd examples/01_chat_room
+cargo build              # 首次 ~3min (iroh 依赖)
+```
+
+## 文件结构
+
+```
+examples/01_chat_room/
+├── Cargo.toml             # 依赖 iroh + zenoh-link-state
+├── src/
+│   ├── chat.rs            # ChatMessage 类型
+│   └── main.rs            # iroh P2P 聊天主程序
+├── send_test.sh           # 双终端自动测试脚本
+└── README.md              # 本文档
+```
