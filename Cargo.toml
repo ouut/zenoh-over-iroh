@@ -5,3 +5,4 @@ members = [
     "zenoh-link-iroh",
     "bindings",
 ]
+exclude = ["examples/*"]
