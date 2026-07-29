@@ -2,16 +2,19 @@
 name = "zenoh-mobile"
 version = "0.1.0"
 edition = "2021"
-description = "Zenoh × Iroh mobile library for iOS and Android"
+description = "Zenoh × Iroh for iOS/Android — static lib including iroh transport"
 
 [lib]
 crate-type = ["staticlib", "cdylib"]
 name = "zenoh_mobile"
 
 [dependencies]
+# Zenoh 核心 + Iroh 传输层 = 全部编译进这个 lib
 zenoh = { version = "1", default-features = false, features = ["transport_tcp"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+iroh = "0.32"
 zenoh-link-state = { path = ".." }
-chrono = "0.4"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+
+# 序列化
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

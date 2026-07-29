@@ -1,158 +1,103 @@
-# Mobile 端集成方案
+# Mobile: Zenoh × Iroh 移动端集成
 
-> zenoh-link-iroh 如何被手机使用：iOS 和 Android。
+> 一个 `.a` / `.so` 包含 Zenoh 核心 + Iroh 传输层 + LinkStateMachine。
 
 ---
 
-## 核心问题
+## 架构
 
-桌面用 `zenohd -P iroh_link` 加载 `.so`，但手机**没有 zenohd**。手机是把 `zenoh` + `iroh` 作为静态库链接到 App 里的。
-
-## iOS 方案
-
-### Step 1: 创建一个 Rust 移动端 Lib
-
-```bash
-# 新项目目录（不在本 repo 里，是另一个 Cargo workspace）
-mkdir zenoh-mobile && cd zenoh-mobile
-
-# Cargo.toml
-cat > Cargo.toml << 'EOF'
-[package]
-name = "zenoh_mobile"
-version = "0.1.0"
-edition = "2021"
-
-[lib]
-crate-type = ["staticlib"]       # → .a 静态库
-
-[dependencies]
-zenoh = "1"
-iroh = "0.32"
-zenoh-link-state = { git = "https://github.com/ouut/zenoh-over-iroh" }
-EOF
+```
+你的 Swift / Kotlin 代码
+       │ session.put("k","v")
+       ▼
+┌──────────────────────────────┐
+│  libzenoh_mobile.a / .so      │  ← 编译产物
+│                              │
+│  ├─ zenoh pub/sub             │
+│  ├─ iroh QUIC P2P 传输层      │  ← 全部静态链接
+│  └─ LinkStateMachine          │
+└──────────────────────────────┘
 ```
 
-### Step 2: 写 FFI 层（暴露 Zenoh C API）
+**不对接官方 `zenoh-c`**——因为 `zenoh-c` 只包含官方 Zenoh，没有 Iroh 传输层。
+我们自己编译一个包含一切的 lib，API 和官方完全一致。
 
-```rust
-// src/lib.rs — 把 Zenoh 的 session/zid/put/subscribe 暴露为 C 函数
-use std::ffi::{CStr, CString};
-use std::sync::OnceLock;
-use zenoh::prelude::r#async::*;
+---
 
-static SESSION: OnceLock<zenoh::Session> = OnceLock::new();
-
-#[no_mangle]
-pub extern "C" fn zenoh_mobile_open(yaml_config: *const std::os::raw::c_char) -> i32 {
-    let c_str = unsafe { CStr::from_ptr(yaml_config) };
-    let config_str = c_str.to_str().unwrap();
-
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let session = rt.block_on(async {
-        // "listen": ["iroh/0.0.0.0:0"]  ← 这一行启用 iroh 传输层
-        zenoh::open(zenoh::Config::from_str(config_str).unwrap()).await.unwrap()
-    });
-
-    SESSION.set(session).map(|_| 0).unwrap_or(-1)
-}
-
-#[no_mangle]
-pub extern "C" fn zenoh_mobile_put(key: *const std::os::raw::c_char, value: *const std::os::raw::c_char) -> i32 {
-    let session = match SESSION.get() { Some(s) => s, None => return -1 };
-    let k = unsafe { CStr::from_ptr(key).to_str().unwrap() };
-    let v = unsafe { CStr::from_ptr(value).to_str().unwrap() };
-    rt().block_on(session.put(k, v)).map(|_| 0).unwrap_or(-1)
-}
-```
-
-### Step 3: 编译
+## 编译
 
 ```bash
+cd mobile
+
 # iOS 真机
 cargo build --release --target aarch64-apple-ios
-# 产出: target/aarch64-apple-ios/release/libzenoh_mobile.a
 
-# iOS 模拟器
-cargo build --release --target aarch64-apple-ios-sim
-
-# 合并
-lipo -create -output libzenoh_mobile.a \
-  target/aarch64-apple-ios/release/libzenoh_mobile.a \
-  target/aarch64-apple-ios-sim/release/libzenoh_mobile.a
+# Android arm64
+cargo build --release --target aarch64-linux-android
 ```
 
-### Step 4: Xcode 集成
+## 产物
+
+| 平台 | 文件 | 大小 |
+|------|------|------|
+| iOS | `target/aarch64-apple-ios/release/libzenoh_mobile.a` | ~20MB (release) |
+| Android | `target/aarch64-linux-android/release/libzenoh_mobile.so` | ~10MB (release) |
+
+## 集成
+
+### iOS (Xcode)
+
+1. 将 `libzenoh_mobile.a` + `ios/ZenohMobile.h` 拖入 Xcode
+2. Swift 中调用:
 
 ```swift
-// Swift — 和桌面版一样的 Zenoh API
-let config = """
+// 配置：iroh 传输层
+ZenohMobile.open("""
 {
   mode: "peer",
   listen: { endpoints: ["iroh/0.0.0.0:0"] }
 }
-"""
+""")
 
-// 初始化（传入 config，iroh 传输层在内）
-zenoh_mobile_open(config)
-
-// — 以下就是标准 Zenoh API —
-zenoh_mobile_put("sensor/temp", "25.5")
+// 标准 Zenoh API
+ZenohMobile.put(key: "sensor/temp", value: "25.5°C")
+ZenohMobile.close()
 ```
 
-**整个 Iroh 传输层编译在这个 `.a` 里，包括 LinkStateMachine。**
+### Android (Android Studio)
 
-## Android 方案
-
-### 一样的 Rust 代码，编译为 .so
-
-```bash
-cargo build --release --target aarch64-linux-android
-# 产出: target/aarch64-linux-android/release/libzenoh_mobile.so
-```
-
-### Kotlin 调用
+1. 将 `libzenoh_mobile.so` 放入 `app/src/main/jniLibs/arm64-v8a/`
+2. Kotlin 中调用:
 
 ```kotlin
-// JNI 层
-class ZenohSession {
-    external fun open(config: String): Int
-    external fun put(key: String, value: String): Int
-    external fun subscribe(key: String, callback: (String, String) -> Unit): Int
-    external fun close()
+ZenohMobile.open("""
+{
+  mode: "peer",
+  listen: { endpoints: ["iroh/0.0.0.0:0"] }
 }
-
-// 使用
-val session = ZenohSession()
-session.open("""
-    mode: "peer"
-    listen: { endpoints: ["iroh/0.0.0.0:0"] }
 """)
-session.put("chat/lobby", "hello from Android")
+ZenohMobile.put("sensor/temp", "25.5°C")
+ZenohMobile.close()
 ```
 
-## 跟桌面端的关系
+## 标准 Zenoh 配置
+
+| 传输层 | 配置 | 适用场景 |
+|--------|------|---------|
+| TCP | `"listen": { "endpoints": ["tcp/0.0.0.0:0"] }` | 内网开发 |
+| Iroh P2P | `"listen": { "endpoints": ["iroh/0.0.0.0:0"] }` | 跨 NAT 生产 |
+
+## 文件结构
 
 ```
-桌面端 (zenohd)          手机端 (App)
-─────────────────        ─────────────────
-zenohd -P iroh_link       libzenoh_mobile.a (静态链接)
-      │                          │
-      ▼                          ▼
-zenoh 传输系统             zenoh 传输系统
-      │                          │
-      ▼                          ▼
-iroh QUIC P2P             iroh QUIC P2P
+mobile/
+├── Cargo.toml           # 包含 zenoh + iroh + link-state
+├── src/lib.rs           # FFI: open / put / close
+├── ios/
+│   ├── ZenohMobile.h    # ObjC Bridging Header
+│   ├── ZenohMobile.m    # ObjC 包装
+│   └── HelloWorld.swift # 示例
+├── android/
+│   └── ZenohMobile.kt   # JNI 包装
+└── README.md            # 本文档
 ```
-
-两边 Iroh 互通，不需要额外适配。
-
-## 关键原则
-
-| 问题 | 答案 |
-|------|------|
-| 手机能不能用 `"iroh/"`？ | 可以，编译为静态库后链路层就在里面 |
-| 用户在手机上写什么 API？ | `session.put("k","v")` — 和桌面完全一样 |
-| iroh 在手机端需要额外配置吗？ | 不需要，编译进去后自动生效 |
-| 需不需要单独编译 iroh 的 SDK？ | 不需要，全部在一个 `.so` / `.a` 里 |
-| Swift/Kotlin 怎么写？ | 通过 C FFI 桥接层调 Zenoh API |
