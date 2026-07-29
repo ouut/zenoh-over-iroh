@@ -7,129 +7,116 @@
 ## 项目状态
 
 ```
-Phase 3 第一批 ✅  第二批 ✅  第三批 ⏳ (自建 Relay 部署后)
-33/33 tests PASS  │  15 shell scripts  │  8 docs  │  zenohd 1.9.0 + iroh-relay 1.0.3
+Phase 3 第一批 ✅  第二批 ✅  第三批 ⏳
+33/33 tests PASS  │  crates.io: zenoh-link-state  │  CI: 8 平台自动构建
+```
+
+---
+
+## 产出物
+
+### 产物一：传输层插件（给 zenohd 用）
+
+```
+文件名: libzenoh_link_iroh.so / .dylib / .dll
+源码在: zenoh-link-iroh/
+编译:   cargo build -p zenoh-link-iroh --release
+用法:   zenohd -P iroh_link
+原理:   zenohd 运行时动态加载 .so，注册 "iroh/" endpoint scheme
+大小:   ~2MB
+```
+
+加载后，Zenoh 配置中 `"iroh/"` 生效：
+
+```yaml
+listen:
+  endpoints: ["iroh/0.0.0.0:0"]
+```
+
+### 产物二：跨语言完整库（给开发者用）
+
+```
+文件名: libzenoh_over_iroh.so / .dylib / .a / .dll
+源码在: bindings/ (Cargo.toml + src/lib.rs)
+编译:   cargo build -p zenoh-over-iroh --release
+用法:   C / Python / Swift / Kotlin 直接调用
+大小:   ~20MB（包含 Zenoh 完整 pub/sub + Iroh P2P）
+```
+
+包含 `z_open()`, `z_put()`, `z_subscribe()` 等完整 Zenoh C API **和 Iroh 传输层**。
+
+| 语言 | 文件 | 示例 |
+|------|------|------|
+| C | `bindings/c/zenoh_over_iroh.h` | `z_open(cfg)` |
+| Python | `bindings/python/zenoh.py` | `open_session(cfg)` |
+| Swift | `bindings/swift/ZenohMobile.swift` | `ZenohMobile.open()` |
+| Kotlin | `bindings/kotlin/ZenohMobile.kt` | `ZenohMobile.open()` |
+
+```python
+# Python 示例
+from bindings.python.zenoh import open_session, put
+s = open_session('{"listen":{"endpoints":["iroh/0.0.0.0:0"]}}')
+put(s, "hello", "world")
+```
+
+---
+
+## 目录结构
+
+```
+项目根
+├── src/                    # 核心状态机库 (crates.io: zenoh-link-state)
+├── zenoh-link-iroh/        # 产物一：传输层插件 .so
+├── bindings/               # 产物二：跨语言完整库
+│   ├── src/lib.rs          #   Rust FFI 层
+│   ├── c/                  #   C 头文件
+│   ├── python/             #   Python ctypes 绑定
+│   ├── swift/              #   Swift (iOS)
+│   ├── kotlin/             #   Kotlin (Android)
+│   └── build.sh            #   一键编译
+├── tests/                  # Rust 测试 (33 tests)
+├── examples/               # 示例
+├── scripts/                # 测试脚本
+└── doc/                    # 文档
 ```
 
 ## 快速开始
 
 ```bash
-# 1. 运行所有测试
-cargo test                                    # 33/33 PASS
+# 1. 编译并测试核心库
+cargo test                          # 33/33 PASS
 
-# 2. 启动测试基础设施 (需要 Docker)
-cd infra && ./start.sh --nat symmetric
+# 2. 编译产物一（传输层插件）
+cargo build -p zenoh-link-iroh --release
+# → target/release/libzenoh_link_iroh.so
 
-# 3. 运行 E2E 测试编排器
-./infra/run_all_tests.sh                      # 自动生成报告
+# 3. 编译产物二（跨语言库）
+cargo build -p zenoh-over-iroh --release
+# → target/release/libzenoh_over_iroh.so
 
-# 4. 性能基准 (需要 zenohd)
-/tmp/zenoh/zenohd -P rest --rest-http-port 8001 -l tcp/0.0.0.0:7447 &
-./infra/zenoh-rest-bench.sh all               # TCP 基线: 74 msg/s, 800 Mbps
+# 4. Python 测试
+python3 -c "
+from bindings.python.zenoh import open_session, put, close
+s = open_session('{\"listen\":{\"endpoints\":[\"tcp/127.0.0.1:0\"]}}')
+put(s, 'test', 'hello')
+close(s)
+print('OK')
+"
 ```
 
-## 架构
+## 编译到其他平台
 
-```
-Zenoh 业务层 (Pub/Sub/Query)
-        │
-zenoh_transport::LinkUnicastTrait
-        │
-┌───────┴────────┐
-│ IrohTransportLink  │  ← src/iroh_integration.rs
-│   ├─ write/read     │
-│   ├─ tick()         │
-│   └─ on_path_change │
-└───────┬────────┘
-        │
-┌───────┴────────┐
-│ LinkStateMachine   │  ← src/link_state.rs (33 tests)
-│   Connected        │
-│   Migrating (排队)  │
-│   Disconnected     │
-└───────┬────────┘
-        │
-   iroh::Endpoint (QUIC P2P)
+```bash
+./bindings/build.sh plugin    # 仅产物一（所有桌面平台）
+./bindings/build.sh all       # 全部（含 iOS/Android）
 ```
 
-## 目录
+## 文档
 
-```
-├── src/
-│   ├── lib.rs                  # 模块入口
-│   ├── link_state.rs           # 三态状态机 (270行, 16 tests)
-│   └── iroh_integration.rs     # Zenoh 插件集成层 (370行, 2 tests)
-├── tests/
-│   ├── link_state_tests.rs     # 集成测试 (6 tests)
-│   ├── network_simulation_tests.rs  # tokio 异步时序 (6 tests)
-│   └── batch2_tests.rs         # 第二批用例 (4 tests)
-├── infra/
-│   ├── run_all_tests.sh        # E2E 主编排器
-│   ├── namespace-setup.sh      # Network namespace 隔离
-│   ├── nat-simulation.sh       # NAT 模拟
-│   ├── netem-impairment.sh     # tc netem 损伤注入
-│   ├── observability.sh        # JSONL 日志 + 分析
-│   ├── zenoh-rest-bench.sh     # REST API 基准
-│   ├── test-case-{2,4,5,6,7,8}.sh  # 用例编排
-│   └── docker-compose.yml      # Docker 拓扑
-├── doc/
-│   ├── Zenoh-Iroh整合项目-完整需求文档.md
-│   ├── Agent编排指令-Phase3执行手册.md
-│   ├── 状态机设计说明.md
-│   ├── 插件集成指南.md
-│   ├── 自建Relay部署方案.md
-│   ├── Phase4-前置设计文档.md
-│   ├── Phase3-第一批测试报告.md
-│   └── Phase3-第二批测试报告.md
-└── Cargo.toml                  # [dependencies] tokio, tracing
-```
-
-## 核心设计
-
-### LinkStateMachine (§1.4)
-
-```
-Connected ──(路径失联)──> Migrating ──(超时4s)──> Disconnected
-                │                          ↑
-                └──(路径恢复)──→ Connected ──┘
-```
-
-- `write()`: Connected → 直发 | Migrating → 排队 | Disconnected → 报错
-- `tick()`: 每100ms轮询，超时后清空队列 + 上抛断连
-- **背压**: `with_backpressure(N)` 限制排队深度（风险5.10）
-
-### IrohTransportLink
-
-封装 `LinkStateMachine` 为 Zenoh transport 友好的接口：
-- `start_ticker(on_timeout)` — 后台轮询，超时时回调
-- `on_path_change(bool)` — 路径恢复后自动排出排队数据
-- 与 Iroh QUIC Endpoint 事件对齐
-
-## 性能基准 (TCP localhost)
-
-| 负载 | 吞吐 | 工具 |
-|------|------|------|
-| 100B × 200msg | 74 msg/s | zenohd REST API |
-| 1MB × 10msg | 800 Mbps | zenohd REST API |
-
-> ⚠️ 基于 presets::N0 官方 Relay，未做容量压测（风险5.4）
-> 待 Iroh transport 就绪后补充 TCP vs Iroh 对比数据
-
-## 风险登记
-
-| 编号 | 风险 | 状态 |
-|:---:|------|:---:|
-| 5.2 | QUIC 迁移与 Zenoh 重连语义冲突 | ✅ 状态机设计已落地 |
-| 5.4 | Relay 容量模型未验证 | ⏳ 待用例 3/9 |
-| 5.10 | Migrating 排队无深度上限 | ✅ 背压机制已实现 |
-| 5.8 | tc netem 精度限制 | ⏳ 待真机校准 |
-| 5.9 | Network namespace 权限受限 | ⏳ 待裸机执行 |
-
-详见 `doc/Zenoh-Iroh整合项目-完整需求文档.md` §5。
-
-## 下一步
-
-1. **Docker 环境**: `./infra/start.sh --nat symmetric` → 跑 NAT 测试
-2. **自建 Relay**: 按 `doc/自建Relay部署方案.md` 部署 → 启动第三批
-3. **编译插件**: 按 `doc/插件集成指南.md` 编译 cdylib → `zenohd -P iroh_link`
-4. **标定**: 用例 4/5 实测 P95 迁移耗时 → 回填 `MIGRATING_TIMEOUT_MS`
+| 文档 | 说明 |
+|------|------|
+| `doc/使用Zenoh-over-Iroh的正确方式.md` | 架构原理 + 移动端/桌面端使用 |
+| `doc/状态机设计说明.md` | 三态状态机设计 |
+| `doc/插件集成指南.md` | 如何编译插件并集成到 zenohd |
+| `doc/自建Relay部署方案.md` | 生产环境 Relay 部署 |
+| `doc/Phase4-前置设计文档.md` | 下阶段规划 |
