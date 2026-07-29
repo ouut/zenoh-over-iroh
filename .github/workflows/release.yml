@@ -9,96 +9,68 @@ permissions:
   contents: write
 
 jobs:
-  # ── 产物 1: 传输层插件 ──
-  plugin:
+  build:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
+          # ── 产物 1: 传输层插件 ──
+          - pkg: zenoh-link-iroh
+            os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            ext: so
-          - os: macos-13
+            file: libzenoh_link_iroh.so
+          - pkg: zenoh-link-iroh
+            os: macos-13
             target: x86_64-apple-darwin
-            ext: dylib
-          - os: macos-latest
+            file: libzenoh_link_iroh.dylib
+          - pkg: zenoh-link-iroh
+            os: macos-latest
             target: aarch64-apple-darwin
-            ext: dylib
-          - os: windows-latest
+            file: libzenoh_link_iroh.dylib
+          - pkg: zenoh-link-iroh
+            os: windows-latest
             target: x86_64-pc-windows-msvc
-            ext: dll
+            file: zenoh_link_iroh.dll
+          # ── 产物 2: 跨语言库 ──
+          - pkg: zenoh-over-iroh
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            file: libzenoh_over_iroh.so
+          - pkg: zenoh-over-iroh
+            os: macos-13
+            target: x86_64-apple-darwin
+            file: libzenoh_over_iroh.dylib
+          - pkg: zenoh-over-iroh
+            os: macos-latest
+            target: aarch64-apple-darwin
+            file: libzenoh_over_iroh.dylib
+          - pkg: zenoh-over-iroh
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            file: zenoh_over_iroh.dll
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
+        with: { targets: ${{ matrix.target }} }
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release -p zenoh-link-iroh --target ${{ matrix.target }}
+      - run: cargo build --release -p ${{ matrix.pkg }} --target ${{ matrix.target }}
         shell: bash
       - run: |
           mkdir -p release
-          if [ "${{ matrix.ext }}" = "dll" ]; then
-            copy="cp target/${{ matrix.target }}/release/zenoh_link_iroh.dll release/"
-          else
-            copy="cp target/${{ matrix.target }}/release/libzenoh_link_iroh.${{ matrix.ext }} release/"
-          fi
-          eval "$copy"
+          src="target/${{ matrix.target }}/release/${{ matrix.file }}"
+          echo "Copying: $src"
+          cp -v "$src" release/
           ls -la release/
         shell: bash
       - uses: actions/upload-artifact@v4
         with:
-          name: plugin-${{ matrix.target }}
+          name: ${{ matrix.pkg }}-${{ matrix.target }}
           path: release/
 
-  # ── 产物 2: 跨语言库 ──
-  bindings:
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            ext: so
-          - os: macos-13
-            target: x86_64-apple-darwin
-            ext: dylib
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            ext: dylib
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            ext: dll
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release -p zenoh-over-iroh --target ${{ matrix.target }}
-        shell: bash
-      - run: |
-          mkdir -p release
-          base="target/${{ matrix.target }}/release/zenoh_over_iroh"
-          if [ "${{ matrix.ext }}" = "dll" ]; then
-            cp "${base}.dll" release/
-            cp "${base}.lib" release/ 2>/dev/null || true
-          else
-            cp "${base}.${{ matrix.ext }}" release/
-            cp "${base}.a" release/ 2>/dev/null || true
-          fi
-          ls -la release/
-        shell: bash
-      - uses: actions/upload-artifact@v4
-        with:
-          name: bindings-${{ matrix.target }}
-          path: release/
-
-  # ── Release ──
   release:
-    needs: [plugin, bindings]
     if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -108,5 +80,6 @@ jobs:
           files: artifacts/*/*
           body: |
             ## Zenoh × Iroh v${{ github.ref_name }}
-            ### 产物 1: 传输层插件 → `zenohd -P iroh_link`
-            ### 产物 2: 跨语言库 → C/Python/Swift/Kotlin/JS
+
+            ### 产物 1: transport plugin → `zenohd -P iroh_link`
+            ### 产物 2: cross-language lib → C/Python/Swift/Kotlin/JS
