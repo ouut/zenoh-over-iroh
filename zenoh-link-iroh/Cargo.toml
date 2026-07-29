@@ -1,0 +1,16 @@
+[package]
+name = "zenoh-link-iroh"
+version = "0.1.0"
+edition = "2021"
+description = "Iroh QUIC P2P transport plugin for Zenoh"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+iroh = "0.32"
+zenoh-plugin-trait = "1"
+zenoh-link-commons = "1"
+zenoh-link-state = { path = ".." }
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"

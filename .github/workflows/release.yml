@@ -1,0 +1,116 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  linux-x64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release -p zenoh-link-iroh
+      - run: |
+          mkdir -p release
+          cp target/release/libzenoh_link_iroh.so release/libzenoh_link_iroh-x86_64-linux.so
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: release/
+
+  linux-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release -p zenoh-link-iroh
+      - run: |
+          mkdir -p release
+          cp target/release/libzenoh_link_iroh.so release/libzenoh_link_iroh-aarch64-linux.so
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-aarch64
+          path: release/
+
+  macos-x64:
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release -p zenoh-link-iroh
+      - run: |
+          mkdir -p release
+          cp target/release/libzenoh_link_iroh.dylib release/libzenoh_link_iroh-x86_64-darwin.dylib
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-x86_64
+          path: release/
+
+  macos-arm64:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - run: cargo build --release -p zenoh-link-iroh --target aarch64-apple-darwin
+      - run: |
+          mkdir -p release
+          cp target/aarch64-apple-darwin/release/libzenoh_link_iroh.dylib release/libzenoh_link_iroh-aarch64-darwin.dylib
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-aarch64
+          path: release/
+
+  windows-x64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release -p zenoh-link-iroh
+      - run: |
+          mkdir release
+          cp target/release/zenoh_link_iroh.dll release/zenoh_link_iroh-x86_64-windows.dll
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: release/
+
+  release:
+    needs: [linux-x64, linux-arm64, macos-x64, macos-arm64, windows-x64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*/*
+          body: |
+            ## Pre-built iroh transport plugin for Zenoh
+
+            `libzenoh_link_iroh.so` — 放到 zenohd 插件目录后，"iroh/" endpoint 即可用。
+
+            ### 各平台
+
+            | 文件 | 平台 |
+            |------|------|
+            | `libzenoh_link_iroh-x86_64-linux.so` | Linux x86_64 |
+            | `libzenoh_link_iroh-aarch64-linux.so` | Linux ARM64 |
+            | `libzenoh_link_iroh-x86_64-darwin.dylib` | macOS Intel |
+            | `libzenoh_link_iroh-aarch64-darwin.dylib` | macOS Apple Silicon |
+            | `zenoh_link_iroh-x86_64-windows.dll` | Windows x86_64 |
+
+            ### 使用
+
+            ```bash
+            cp libzenoh_link_iroh.so ~/.zenoh/lib/
+            zenohd -P iroh_link   # 之后 "iroh/" 可用
+            ```
