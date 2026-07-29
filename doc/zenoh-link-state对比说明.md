@@ -262,3 +262,79 @@ Wi-Fi → 4G 切换:
 | Client-Router | 2 | 3 | 逐 Link 隔离 |
 | Mesh (3节点) | 3 | 6 | 故障 Link 自动绕路 |
 | 移动端 | 1 | 1 | 单 Link 迁移 |
+
+---
+
+## bindings 的定位：给谁用的？
+
+### ❌ 不是给最终用户的
+
+如果你用 Zenoh pub/sub，绑定层跟你无关：
+
+```rust
+// 你只需要这样——和用 TCP 没区别
+let session = zenoh::open(config).await?;
+session.put("demo", "hello").await?;
+```
+
+### ✅ 是给传输层实现者的
+
+当你需要**自己实现一个新的 zenoh transport**（比如用 QUIC、蓝牙、LoRa），你需要 LinkStateMachine 来处理连接迁移。这时候 bindings 让你可以从 Python/Swift/Kotlin 调用它。
+
+```
+┌─────────────────────────────────────┐
+│  你的自定义 Transport (Python 写的)   │
+│  ├─ 你的连接管理代码                   │
+│  ├─ zenoh_link_state.LinkStateMachine│  ← 这里用 bindings
+│  └─ 你的网络 IO                      │
+└─────────────────────────────────────┘
+```
+
+---
+
+## 移动端方案：编译一个包含一切的 lib
+
+你的理解是对的——**编译一个包含 zenoh + iroh + state machine 的 lib，然后从 Swift/Kotlin 调 Zenoh C API**。
+
+```
+源代码:
+  zenoh crate (pub/sub 协议)
+  + zenoh-link-iroh (插件: state machine + iroh)
+  + iroh crate (QUIC P2P)
+  ─────────────────────────────────────
+  编译为一个静态库: libzenoh_full.a
+
+iOS (Swift):
+  libzenoh_full.a → Bridging Header → Swift
+  API: zenoh_open(), zenoh_put(), zenoh_subscribe()
+
+Android (Kotlin):
+  libzenoh_full.so → JNI → Kotlin
+  API: Zenoh.open(), session.put(), session.subscribe()
+```
+
+### 具体步骤
+
+```bash
+# 1. 创建移动端 workspace Cargo.toml
+[lib]
+name = "zenoh_mobile"
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+zenoh = "1"
+iroh = "0.32"
+
+# 2. 写 FFI 绑定层 (暴露 Zenoh API, 不是 LinkStateMachine)
+#[no_mangle]
+pub extern "C" fn zenoh_put(key: *const c_char, value: *const c_char) { ... }
+
+# 3. 编译
+cargo build --target aarch64-apple-ios --release
+# → libzenoh_mobile.a  (包含 zenoh + iroh + state machine)
+
+# 4. 集成到 Xcode / Android Studio
+# Swift 调用: zenoh_put("demo/test", "hello")
+```
+
+**用户只需学会 Zenoh 的 pub/sub 概念，不需要知道 iroh 或 state machine 的存在。**
