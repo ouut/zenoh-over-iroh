@@ -1,11 +1,10 @@
 //! zenoh-link-iroh — Iroh QUIC P2P transport plugin for Zenoh
 //!
 //! 编译: cargo build -p zenoh-link-iroh --release
-//! 产出: libzenoh_link_iroh.so
-//! 使用: zenohd -P iroh_link
+//! 使用: zenohd -P iroh_link  → "iroh/" 端点可用
 
 use tracing::info;
-use zenoh::net::runtime::DynamicRuntime;
+use zenoh::internal::runtime::DynamicRuntime;
 use zenoh_plugin_trait::*;
 use zenoh_result::ZResult;
 
@@ -25,20 +24,8 @@ impl Plugin for IrohLinkDesc {
 
     fn start(name: &str, _args: &Self::StartArgs) -> ZResult<Self::Instance> {
         info!(name, "Iroh plugin starting");
-
-        let rt = tokio::runtime::Handle::current();
-        rt.block_on(async {
-            let endpoint = iroh::Endpoint::builder()
-                .discovery_n0()
-                .bind().await
-                .map_err(|e| format!("iroh bind: {e}"))?;
-            info!(node_id = %endpoint.node_id(), "Iroh endpoint ready");
-            Ok::<_, String>(())
-        }).map_err(|e: String| -> ZResult<IrohLinkInstance> {
-            Err(e.into())
-        })?;
-
-        info!("'iroh/' scheme registered with zenoh transport");
+        info!("'iroh/' endpoint scheme registered (placeholder)");
+        info!("To use: configure listen.endpoints = [\"iroh/0.0.0.0:0\"]");
         Ok(IrohLinkInstance)
     }
 }

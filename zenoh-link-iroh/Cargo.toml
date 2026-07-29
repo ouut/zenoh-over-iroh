@@ -9,7 +9,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 iroh = "0.32"
-zenoh = { version = "1", features = [] }
+zenoh = { version = "1", features = ["internal"] }
 zenoh-plugin-trait = "1"
 zenoh-result = "1"
 zenoh-link-state = { path = "../zenoh-link-state" }

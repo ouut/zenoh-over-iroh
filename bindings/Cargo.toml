@@ -2,14 +2,14 @@
 name = "zenoh-over-iroh"
 version = "0.1.0"
 edition = "2021"
-description = "Zenoh × Iroh — full Zenoh C API + Iroh P2P transport in one library"
+description = "Zenoh × Iroh — full C API + Iroh P2P transport in one library"
 
 [lib]
 crate-type = ["staticlib", "cdylib"]
 name = "zenoh_over_iroh"
 
 [dependencies]
-zenoh = { version = "1", default-features = false, features = ["transport_tcp"] }
+zenoh = "1"
 iroh = "0.32"
 zenoh-link-state = { path = "../zenoh-link-state" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
