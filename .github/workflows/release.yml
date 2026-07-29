@@ -8,10 +8,8 @@ on:
 permissions:
   contents: write
 
-# ××××××××××××××××××××××××××××××××××××××××××××
-#  产物 1: 传输层插件  编译: make plugin
-# ××××××××××××××××××××××××××××××××××××××××××××
 jobs:
+  # ── 产物 1: 传输层插件 ──
   plugin:
     strategy:
       matrix:
@@ -37,21 +35,23 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release -p zenoh-link-iroh --target ${{ matrix.target }}
+        shell: bash
       - run: |
           mkdir -p release
           if [ "${{ matrix.ext }}" = "dll" ]; then
-            cp target/${{ matrix.target }}/release/zenoh_link_iroh.${{ matrix.ext }} release/
+            copy="cp target/${{ matrix.target }}/release/zenoh_link_iroh.dll release/"
           else
-            cp target/${{ matrix.target }}/release/libzenoh_link_iroh.${{ matrix.ext }} release/
+            copy="cp target/${{ matrix.target }}/release/libzenoh_link_iroh.${{ matrix.ext }} release/"
           fi
+          eval "$copy"
+          ls -la release/
+        shell: bash
       - uses: actions/upload-artifact@v4
         with:
           name: plugin-${{ matrix.target }}
           path: release/
 
-  # ××××××××××××××××××××××××××××××××××××××××××××
-  #  产物 2: 跨语言完整库  编译: make bindings
-  # ××××××××××××××××××××××××××××××××××××××××××××
+  # ── 产物 2: 跨语言库 ──
   bindings:
     strategy:
       matrix:
@@ -77,23 +77,25 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release -p zenoh-over-iroh --target ${{ matrix.target }}
+        shell: bash
       - run: |
           mkdir -p release
-          BASE="target/${{ matrix.target }}/release/libzenoh_over_iroh"
+          base="target/${{ matrix.target }}/release/zenoh_over_iroh"
           if [ "${{ matrix.ext }}" = "dll" ]; then
-            cp "target/${{ matrix.target }}/release/zenoh_over_iroh.dll" release/
+            cp "${base}.dll" release/
+            cp "${base}.lib" release/ 2>/dev/null || true
           else
-            cp "${BASE}.${{ matrix.ext }}" release/
-            cp "${BASE}.a" release/ 2>/dev/null || true
+            cp "${base}.${{ matrix.ext }}" release/
+            cp "${base}.a" release/ 2>/dev/null || true
           fi
+          ls -la release/
+        shell: bash
       - uses: actions/upload-artifact@v4
         with:
           name: bindings-${{ matrix.target }}
           path: release/
 
-  # ××××××××××××××××××××××××××××××××××××××××××××
-  #  Release: 合并 → GitHub Release
-  # ××××××××××××××××××××××××××××××××××××××××××××
+  # ── Release ──
   release:
     needs: [plugin, bindings]
     if: startsWith(github.ref, 'refs/tags/v')
@@ -106,15 +108,5 @@ jobs:
           files: artifacts/*/*
           body: |
             ## Zenoh × Iroh v${{ github.ref_name }}
-
-            ### 产物 1: 传输层插件
-            - `libzenoh_link_iroh.so/dylib/dll` → `zenohd -P iroh_link`
-
-            ### 产物 2: 跨语言完整库
-            - `libzenoh_over_iroh.so/dylib/dll` + `.a`
-            - C / Python / Swift / Kotlin 直接调用
-
-            ```bash
-            zenohd -P iroh_link
-            # 配置: listen.endpoints = ["iroh/0.0.0.0:0"]
-            ```
+            ### 产物 1: 传输层插件 → `zenohd -P iroh_link`
+            ### 产物 2: 跨语言库 → C/Python/Swift/Kotlin/JS
