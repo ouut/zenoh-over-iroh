@@ -101,3 +101,35 @@ mobile/
 │   └── ZenohMobile.kt   # JNI 包装
 └── README.md            # 本文档
 ```
+
+---
+
+## Python 支持
+
+`.so` 编译后，通过 Python ctypes 直接调用，**无需 pip 安装任何包**：
+
+```python
+from mobile.python.zenoh import open_session, put, subscribe, close
+
+s = open_session('{"listen": {"endpoints": ["tcp/127.0.0.1:0"]}}')
+put(s, "hello", "world")
+
+def on_msg(key, value):
+    print(f"收到: {key} = {value}")
+
+subscribe(s, "demo/test", on_msg)
+close(s)
+```
+
+## 多语言支持
+
+产出物 `libzenoh_mobile.so` / `.a` 是标准 C ABI，任何支持 FFI 的语言均可使用：
+
+| 语言 | 方案 | 代码量 |
+|------|------|:---:|
+| C | 直接包含 `include/zenoh_mobile.h` | 0 |
+| Python | `mobile/python/zenoh.py` (ctypes) | 50 行 |
+| Swift | `mobile/ios/ZenohMobile.h` / `.m` | 20 行 |
+| Kotlin | `mobile/android/ZenohMobile.kt` (JNI) | 15 行 |
+| Lua | `ffi.load("libzenoh_mobile")` | 10 行 |
+| Node.js | `ffi-napi` 加载 `.so` | 20 行 |
