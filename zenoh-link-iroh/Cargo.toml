@@ -12,6 +12,6 @@ iroh = "0.32"
 zenoh = { version = "1", features = [] }
 zenoh-plugin-trait = "1"
 zenoh-result = "1"
-zenoh-link-state = { path = ".." }
+zenoh-link-state = { path = "../zenoh-link-state" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 tracing = "0.1"
