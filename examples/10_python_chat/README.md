@@ -1,55 +1,56 @@
-# Python 聊天室 — iroh P2P + LinkStateMachine
+# example 10 — Python Zenoh 聊天室 (Iroh 传输层)
 
-> Example 09 的 Python 复刻：spawn Rust iroh 二进制处理 QUIC P2P，
-> Python 侧提供 UI + LinkStateMachine 状态管理。
+> 使用 `eclipse-zenoh` Python 包，搭配 Iroh 传输层。
+> 用户只写 Zenoh API，不需要知道 Iroh 的细节。
 
-## 快速开始
+---
+
+## 正确使用方式
+
+```python
+import zenoh
+
+# 唯一改动：配置端点为 iroh/
+config = {
+    "mode": "peer",
+    "listen": {"endpoints": ["iroh/0.0.0.0:0"]},
+}
+
+session = zenoh.open(config)
+
+# ── 标准 Zenoh API，和 TCP 完全一样 ──
+
+# 发布
+session.put("chat/lobby", "hello from Python")
+
+# 订阅
+sub = session.declare_subscriber("chat/lobby")
+for msg in sub:
+    print(f"[{msg.key_expr()}] {msg.payload.decode()}")
+
+# 查询
+responses = session.get("chat/**").wait()
+for r in responses:
+    print(f"  {r.key_expr}: {r.payload.decode()}")
+```
+
+---
+
+## 当前 example 10 说明
+
+当前 `chat.py` 通过 subprocess 调用 Rust iroh 二进制，是**底层传输验证**。生产环境直接用 `pip install eclipse-zenoh` 加 `"iroh/..."` 配置即可，不需要 subprocess。
+
+| 方式 | 推荐？ | 理由 |
+|------|:---:|------|
+| `pip install eclipse-zenoh` + iroh 配置 | ✅ | 标准 API，生态兼容 |
+| subprocess + iroh 二进制 | ❌ | 仅用于底层验证 |
+
+---
+
+## 安装
 
 ```bash
-# 1. 编译 Rust iroh 聊天二进制
-cd examples/09_chat_room
-cargo build --release
-
-# 2. 终端 1
-cd examples/10_python_chat
-python chat.py Alice
-
-# 3. 终端 2 (连接 Alice 的 NodeID)
-cd examples/10_python_chat
-python chat.py Bob
-# > /connect <Alice的NodeID>
+pip install eclipse-zenoh
 ```
 
-## 架构
-
-```
-┌─────────────────────────────────┐
-│  Python chat.py                 │  ← 本文件
-│  ├─ LinkStateMachine (FFI)      │     连接状态管理
-│  ├─ UI (stdin/stdout)           │     命令行交互
-│  └─ Subprocess                  │
-│       │ stdin/stdout             │
-│       ▼                          │
-│  Rust chat binary (example 09)  │  ← 真实 iroh QUIC P2P
-│  ├─ Iroh Endpoint               │
-│  ├─ QUIC P2P / Relay            │
-│  └─ Message routing             │
-└─────────────────────────────────┘
-```
-
-## 通信流程
-
-1. Python 启动 Rust `chat` 二进制作为子进程
-2. Python 从 Rust stdout 提取 NodeID
-3. 用户输入 → Python 写入子进程 stdin
-4. 子进程通过 iroh QUIC 发送到对端
-5. 对端消息 → Rust stdout → Python 解析显示
-
-## LinkStateMachine 行为
-
-| 场景 | write() | 效果 |
-|------|:---:|------|
-| 正常 | sent | 消息通过 iroh 送达 |
-| 断网 | queued | 消息排队 |
-| 恢复 | drain() | 排队消息自动排出 |
-| 溢出 | backpressure | 提示用户稍候 |
+无需安装 iroh、无需编译 Rust。

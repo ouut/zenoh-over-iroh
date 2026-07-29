@@ -43,9 +43,3 @@ pub mod link_state;
 /// LinkUnicast 实现中，作为 zenoh transport trait 和实际 Iroh IO 之间的
 /// 非侵入式中间层。
 pub mod iroh_integration;
-
-/// C FFI 层 — 面向 iOS / Android 的 C ABI。
-///
-/// 通过 `extern "C"` 函数暴露 `LinkStateMachine`，
-/// 可被 Swift (iOS) 和 Kotlin/Java (Android) 直接调用。
-pub mod ffi;
